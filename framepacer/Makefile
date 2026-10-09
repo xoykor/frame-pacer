@@ -66,6 +66,8 @@ test: all
 	sh -n build/framepacer-run.test && echo "wrapper syntax OK"; \
 	rm -rf build/fakehome; mkdir -p build/fakehome/.local/share/framepacer/vk-layer && touch build/fakehome/.local/share/framepacer/vk-layer/framepacer.json; \
 	HOME=build/fakehome env -u XDG_DATA_HOME sh build/framepacer-run.test env | grep -q "framepacer/vk-layer" && echo "wrapper VK_ADD_LAYER_PATH OK"; \
+	echo "== Tray (fechar minimiza) =="; \
+	QT_QPA_PLATFORM=offscreen FRAMEPACER_TEST_GUI=1 python3 tests/test_tray.py; \
 	echo; echo "TODOS OS TESTES PASSARAM"
 
 clean:

@@ -80,7 +80,7 @@ Jogos Proton que só usam DX9–12 também funcionam só com a camada Vulkan:
 ENABLE_FRAMEPACER=1 %command%
 ```
 
-Abra o **FramePacer** pelo menu de aplicativos (ou `framepacer`) para ajustar o limite com sliders, presets e leitura de FPS. Atalhos úteis no KDE (Configurações → Atalhos → Adicionar comando):
+Abra o **FramePacer** pelo menu de aplicativos (ou `framepacer`) para ajustar o limite com sliders, presets e leitura de FPS. Fechar a janela (X) minimiza para a bandeja; para encerrar use **Sair** no menu do ícone. Atalhos úteis no KDE (Configurações → Atalhos → Adicionar comando):
 
 ```
 framepacer --set 60

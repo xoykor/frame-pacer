@@ -184,11 +184,12 @@ def cli(args) -> int:
 
 
 # --------------------------------------------------------------------------- GUI
-def run_gui() -> int:
+def run_gui():
     from PySide6.QtCore import Qt, QTimer
-    from PySide6.QtGui import QFont
-    from PySide6.QtWidgets import (QApplication, QFrame, QGroupBox, QHBoxLayout, QLabel,
-                                   QPushButton, QScrollArea, QSizePolicy, QSlider, QSpinBox, QVBoxLayout, QWidget)
+    from PySide6.QtGui import QFont, QIcon
+    from PySide6.QtWidgets import (QApplication, QFrame, QGroupBox, QHBoxLayout, QLabel, QMenu,
+                                   QPushButton, QScrollArea, QSizePolicy, QSlider, QSpinBox,
+                                   QSystemTrayIcon, QVBoxLayout, QWidget)
 
     def make_spin() -> QSpinBox:
         s = QSpinBox()
@@ -311,10 +312,53 @@ def run_gui() -> int:
             root.addWidget(scroll, 1)
             root.addWidget(copy)
 
+            self._tray = None
+            self._tray_menu = None
+            self._toggle_act = None
+            if QSystemTrayIcon.isSystemTrayAvailable():
+                tray = QSystemTrayIcon(self)
+                tray.setIcon(QIcon.fromTheme("applications-games"))
+                tray.setToolTip("FramePacer")
+                menu = QMenu()
+                self._toggle_act = menu.addAction("Mostrar")
+                self._toggle_act.triggered.connect(self.toggle_from_tray)
+                quit_act = menu.addAction("Sair")
+                quit_act.triggered.connect(QApplication.quit)
+                tray.setContextMenu(menu)
+                tray.activated.connect(self._on_tray_activated)
+                tray.show()
+                self._tray = tray
+                self._tray_menu = menu
+
             self.timer = QTimer(self)
             self.timer.timeout.connect(self.tick)
             self.timer.start(500)
             self.tick()
+
+        def toggle_from_tray(self) -> None:
+            if self.isVisible():
+                self.hide()
+                if self._toggle_act is not None:
+                    self._toggle_act.setText("Mostrar")
+            else:
+                self.show()
+                self.raise_()
+                self.activateWindow()
+                if self._toggle_act is not None:
+                    self._toggle_act.setText("Esconder")
+
+        def _on_tray_activated(self, reason) -> None:
+            if reason == QSystemTrayIcon.Trigger:
+                self.toggle_from_tray()
+
+        def closeEvent(self, e) -> None:
+            if self._tray is not None:
+                e.ignore()
+                self.hide()
+                if self._toggle_act is not None:
+                    self._toggle_act.setText("Mostrar")
+            else:
+                super().closeEvent(e)
 
         def apply_all(self) -> None:
             for c in self.cards.values():
@@ -339,10 +383,12 @@ def run_gui() -> int:
                     card.refresh()
             self.empty.setVisible(not self.cards)
 
-    app = QApplication(sys.argv)
+    app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("FramePacer")
     app.setDesktopFileName("framepacer")  # casa com o framepacer.desktop no Wayland
     w = Main()
+    if os.environ.get("FRAMEPACER_TEST_GUI"):
+        return app, w  # gancho de teste (sem mostrar nem entrar no loop)
     w.show()
     return app.exec()
 
