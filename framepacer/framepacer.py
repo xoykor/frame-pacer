@@ -76,7 +76,82 @@ QLabel#apiBadge { background: #2c2c3d; color: #00e5a0; border-radius: 8px; paddi
 QLabel#fpsBig { font-size: 20pt; font-weight: bold; color: #ececf1; }
 QLabel#emptyLabel { color: #9a9ab0; font-size: 11pt; }
 QWidget#graph { background: #17171f; border: 1px solid #2c2c3d; border-radius: 8px; }
+QPushButton#iconBtn { padding: 6px 8px; }
 """
+
+
+def _icon_pixmap(size: int, draw) -> "object":
+    from PySide6.QtGui import QPixmap, QPainter
+    from PySide6.QtCore import Qt
+    pm = QPixmap(size, size)
+    pm.fill(Qt.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+    draw(p, size)
+    p.end()
+    return pm
+
+
+def power_icon():
+    """Símbolo ligar vetorizado: cinza desligado, menta ligado."""
+    from PySide6.QtGui import QIcon, QPen, QColor
+    from PySide6.QtCore import Qt
+
+    def draw(color):
+        def _d(p, s):
+            pen = QPen(QColor(color), max(2, s // 9))
+            pen.setCapStyle(Qt.RoundCap)
+            p.setPen(pen)
+            m = s * 0.20
+            p.drawArc(int(m), int(m), int(s - 2 * m), int(s - 2 * m), 120 * 16, 300 * 16)
+            p.drawLine(int(s / 2), int(s * 0.10), int(s / 2), int(s * 0.52))
+        return _d
+
+    icon = QIcon()
+    icon.addPixmap(_icon_pixmap(24, draw(C_DIM)), QIcon.Normal, QIcon.Off)
+    icon.addPixmap(_icon_pixmap(24, draw(C_ACCENT)), QIcon.Normal, QIcon.On)
+    return icon
+
+
+def floppy_icon():
+    """Disquete vetorizado."""
+    from PySide6.QtGui import QIcon, QPen, QColor
+    from PySide6.QtCore import Qt
+
+    def _d(p, s):
+        m = s * 0.12
+        pen = QPen(QColor(C_TEXT), max(2, s // 11))
+        pen.setJoinStyle(Qt.RoundJoin)
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+        p.drawRoundedRect(int(m), int(m), int(s - 2 * m), int(s - 2 * m), 2, 2)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(C_ACCENT))
+        p.drawRect(int(s * 0.32), int(m), int(s * 0.36), int(s * 0.30))
+        p.setBrush(QColor(C_TEXT))
+        p.drawRect(int(s * 0.28), int(s * 0.58), int(s * 0.44), int(s * 0.30))
+
+    icon = QIcon()
+    icon.addPixmap(_icon_pixmap(24, _d))
+    return icon
+
+
+def copy_icon():
+    """Duas páginas sobrepostas."""
+    from PySide6.QtGui import QIcon, QPen, QColor
+    from PySide6.QtCore import Qt
+
+    def _d(p, s):
+        pen = QPen(QColor(C_TEXT), max(2, s // 11))
+        pen.setJoinStyle(Qt.RoundJoin)
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+        p.drawRoundedRect(int(s * 0.30), int(s * 0.14), int(s * 0.52), int(s * 0.56), 2, 2)
+        p.drawRoundedRect(int(s * 0.18), int(s * 0.30), int(s * 0.52), int(s * 0.56), 2, 2)
+
+    icon = QIcon()
+    icon.addPixmap(_icon_pixmap(24, _d))
+    return icon
 
 
 def base_dir() -> str:
@@ -451,15 +526,26 @@ def run_gui():
 
             self.def_spin = make_spin()
             self.def_spin.setValue(read_default())
-            save = QPushButton("Salvar padrão")
-            save.clicked.connect(lambda: write_default(self.def_spin.value()))
-            apply_all = QPushButton("Aplicar a todos os abertos")
-            apply_all.clicked.connect(self.apply_all)
+            self.save_btn = QPushButton()
+            self.save_btn.setObjectName("iconBtn")
+            self.save_btn.setIcon(floppy_icon())
+            self.save_btn.setIconSize(QSize(20, 20))
+            self.save_btn.setToolTip("Salvar padrão")
+            self.save_btn.setFixedWidth(46)
+            self.save_btn.clicked.connect(lambda: write_default(self.def_spin.value()))
+            self.global_power = QPushButton()
+            self.global_power.setObjectName("powerBtn")
+            self.global_power.setIcon(power_icon())
+            self.global_power.setIconSize(QSize(20, 20))
+            self.global_power.setToolTip("Liga/desliga o limite de todos os jogos abertos")
+            self.global_power.setCheckable(True)
+            self.global_power.setFixedWidth(46)
+            self.global_power.toggled.connect(self._on_global_power)
             box = QGroupBox("Limite inicial dos próximos jogos")
             bl = QHBoxLayout(box)
-            bl.addWidget(self.def_spin)
-            bl.addWidget(save)
-            bl.addWidget(apply_all)
+            bl.addWidget(self.def_spin, 1)
+            bl.addWidget(self.save_btn)
+            bl.addWidget(self.global_power)
 
             holder = QWidget()
             holder.setObjectName("holder")
@@ -478,14 +564,20 @@ def run_gui():
             self.empty.setTextFormat(Qt.RichText)
             self.empty.setWordWrap(True)
 
-            copy = QPushButton("Copiar opção de inicialização do Steam")
-            copy.clicked.connect(lambda: QApplication.clipboard().setText(launch_option()))
+            self.copy_btn = QPushButton("Copiar opção de inicialização do Steam")
+            self.copy_btn.setIcon(copy_icon())
+            self.copy_btn.setIconSize(QSize(18, 18))
+            self.copy_btn.clicked.connect(lambda: QApplication.clipboard().setText(launch_option()))
 
             root = QVBoxLayout(self)
             root.addWidget(box)
             root.addWidget(self.empty)
             root.addWidget(scroll, 1)
-            root.addWidget(copy)
+            copy_row = QHBoxLayout()
+            copy_row.addStretch(1)
+            copy_row.addWidget(self.copy_btn)
+            copy_row.addStretch(1)
+            root.addLayout(copy_row)
 
             self._tray = None
             self._tray_menu = None
@@ -535,9 +627,10 @@ def run_gui():
             else:
                 super().closeEvent(e)
 
-        def apply_all(self) -> None:
+        def _on_global_power(self, on: bool) -> None:
+            v = self.def_spin.value() if on else 0
             for c in self.cards.values():
-                c.spin.setValue(self.def_spin.value())
+                c._apply_limit(v)
 
         def tick(self) -> None:
             seen = set(list_paths())
@@ -557,6 +650,11 @@ def run_gui():
                 else:
                     card.refresh()
             self.empty.setVisible(not self.cards)
+            if self.cards:
+                any_on = any(c.game.limit() > 0 for c in self.cards.values())
+                self.global_power.blockSignals(True)
+                self.global_power.setChecked(any_on)
+                self.global_power.blockSignals(False)
 
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("FramePacer")

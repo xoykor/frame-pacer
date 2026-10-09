@@ -93,5 +93,39 @@ with mock.patch.object(QSystemTrayIcon, "isSystemTrayAvailable", return_value=Fa
     _, w3, _ = f.run_gui()
 assert w3.cards, "tick deveria detectar o jogo fake"
 print("tick detect OK")
+os.environ.pop("FRAMEPACER_DIR", None)
+
+# header: ícones vetoriais + power global no lugar de aplicar-a-todos
+from PySide6.QtGui import QIcon
+
+pwr = f.power_icon()
+assert not pwr.pixmap(24, 24, QIcon.Normal, QIcon.Off).isNull()
+assert not pwr.pixmap(24, 24, QIcon.Normal, QIcon.On).isNull()
+assert not f.floppy_icon().pixmap(24, 24).isNull()
+assert not f.copy_icon().pixmap(24, 24).isNull()
+print("icons OK")
+
+HDR = tempfile.mkdtemp(prefix="fp-hdr-")
+hpath = os.path.join(HDR, "42441.shm")
+with open(hpath, "wb") as fh:
+    fh.write(struct.pack(f.FMT, f.MAGIC, 2, 42441, 0, 60, 6000, _time.monotonic_ns(), b"hdrgame"))
+    fh.write(b"\0" * (f.FT_SIZE - 64))
+os.environ["FRAMEPACER_DIR"] = HDR
+with mock.patch.object(QSystemTrayIcon, "isSystemTrayAvailable", return_value=False):
+    _, w4, _ = f.run_gui()
+assert not w4.save_btn.icon().isNull(), "salvar deveria ser disquete"
+assert not w4.copy_btn.icon().isNull()
+assert w4.global_power.isCheckable()
+w4.global_power.click()  # desliga tudo
+assert list(w4.cards.values())[0].game.limit() == 0
+assert not w4.global_power.isChecked()
+w4.global_power.click()  # religa com o padrão
+assert list(w4.cards.values())[0].game.limit() == w4.def_spin.value()
+assert w4.global_power.isChecked()
+list(w4.cards.values())[0].game.set_limit(0)  # mudança externa sincroniza
+w4.tick()
+assert not w4.global_power.isChecked()
+print("global power OK")
+os.environ.pop("FRAMEPACER_DIR", None)
 
 print("GUI TESTS OK")
