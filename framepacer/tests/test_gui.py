@@ -85,6 +85,9 @@ def accent_pixels(image):
     return n
 
 assert accent_pixels(img) > 20, "linha do gráfico deveria usar o acento"
+band = [img.pixelColor(x, y) for y in range(0, 16) for x in range(0, 300, 2)]
+bright = sum(1 for p in band if p.red() > 180 and p.green() > 180 and p.blue() > 180)
+assert bright > 30, f"texto de stats ilegível/cortado: {bright}"
 fg2 = FrameGraph()
 fg2.resize(300, 76)
 fg2.show()
@@ -139,5 +142,32 @@ w4.tick()
 assert not w4.global_power.isChecked()
 print("global power OK")
 os.environ.pop("FRAMEPACER_DIR", None)
+
+# autostart: liga/desliga escreve/remove o .desktop (HOME isolado)
+with tempfile.TemporaryDirectory() as home:
+    with mock.patch.dict(os.environ, {"HOME": home}):
+        assert not f.autostart_enabled()
+        f.set_autostart(True)
+        assert f.autostart_enabled()
+        content = open(f.autostart_path()).read()
+        assert "--minimized" in content and "framepacer" in content, repr(content)
+        f.set_autostart(True)  # idempotente
+        assert f.autostart_enabled()
+        f.set_autostart(False)
+        assert not f.autostart_enabled()
+assert f.start_hidden(True, True) and not f.start_hidden(True, False)
+assert not f.start_hidden(False, True) and not f.start_hidden(False, False)
+print("autostart OK")
+
+# botão iniciar-junto reflete e alterna o arquivo (HOME isolado)
+with tempfile.TemporaryDirectory() as home:
+    with mock.patch.dict(os.environ, {"HOME": home}):
+        assert w0.autostart_btn.isCheckable()
+        initial = w0.autostart_btn.isChecked()
+        w0.autostart_btn.click()
+        assert f.autostart_enabled() != initial
+        w0.autostart_btn.click()
+        assert f.autostart_enabled() == initial
+print("autostart button OK")
 
 print("GUI TESTS OK")

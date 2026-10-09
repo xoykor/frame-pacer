@@ -25,6 +25,36 @@ OFF_LIMIT, OFF_FPS, OFF_HB = 16, 20, 24
 API_NAMES = ((1, "Vulkan"), (2, "OpenGL (GLX)"), (4, "OpenGL (EGL)"))
 
 
+def autostart_path() -> str:
+    return os.path.join(os.path.expanduser("~"), ".config", "autostart", "framepacer.desktop")
+
+
+def autostart_enabled() -> bool:
+    return os.path.isfile(autostart_path())
+
+
+def set_autostart(on: bool) -> None:
+    """Liga/desliga iniciar com o sistema (XDG autostart, abre minimizado)."""
+    path = autostart_path()
+    if not on:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        return
+    exe = shutil.which("framepacer") or os.path.realpath(sys.argv[0])
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as fh:
+        fh.write("[Desktop Entry]\nType=Application\nName=FramePacer\n"
+                 "Comment=Limitador de FPS em tempo real\n"
+                 f"Exec={exe} --minimized\nIcon=applications-games\nTerminal=false\n"
+                 "Categories=Game;Utility;\nX-GNOME-Autostart-enabled=true\n")
+
+
+def start_hidden(minimized: bool, tray_ok: bool) -> bool:
+    return minimized and tray_ok
+
+
 def launch_option() -> str:
     """Opção de inicialização do Steam, com caminho absoluto se o PATH do Steam não achar o wrapper."""
     return f"{shutil.which('framepacer-run') or 'framepacer-run'} %command%"
@@ -323,9 +353,9 @@ def cli(args) -> int:
 
 
 # --------------------------------------------------------------------------- GUI
-def run_gui():
+def run_gui(minimized: bool = False):
     from PySide6.QtCore import Qt, QTimer, QRectF, QSize
-    from PySide6.QtGui import QIcon, QColor, QPainter, QPen, QPalette, QLinearGradient, QPainterPath
+    from PySide6.QtGui import QFont, QIcon, QColor, QPainter, QPen, QPalette, QLinearGradient, QPainterPath
     from PySide6.QtWidgets import (QApplication, QFrame, QGroupBox, QHBoxLayout, QLabel, QMenu,
                                    QPushButton, QScrollArea, QSizePolicy, QSlider, QSpinBox,
                                    QSystemTrayIcon, QVBoxLayout, QWidget)
@@ -416,8 +446,17 @@ def run_gui():
             s = sorted(self.samples)
             avg = sum(self.samples) / n
             p95 = s[min(int(n * 0.95), n - 1)]
-            p.setPen(QColor(C_DIM))
-            p.drawText(pad_l, 12, f"média {avg:.1f} ms · p95 {p95:.1f} ms")
+            stats = f"média {avg:.1f} ms · p95 {p95:.1f} ms"
+            sfont = QFont()
+            sfont.setPointSize(10)
+            sfont.setBold(True)
+            p.setFont(sfont)
+            tw = p.fontMetrics().horizontalAdvance(stats)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(0, 0, 0, 130))
+            p.drawRoundedRect(pad_l - 5, 0, tw + 10, 17, 4, 4)
+            p.setPen(QColor("#d5d6ea"))
+            p.drawText(pad_l, 13, stats)
 
     class Card(QFrame):
         def __init__(self, game: Game):
@@ -582,6 +621,12 @@ def run_gui():
             copy_row = QHBoxLayout()
             copy_row.addStretch(1)
             copy_row.addWidget(self.copy_btn)
+            self.autostart_btn = QPushButton("Iniciar junto")
+            self.autostart_btn.setToolTip("Iniciar o FramePacer com o sistema (minimizado na bandeja)")
+            self.autostart_btn.setCheckable(True)
+            self.autostart_btn.setChecked(autostart_enabled())
+            self.autostart_btn.toggled.connect(self._on_autostart)
+            copy_row.addWidget(self.autostart_btn)
             copy_row.addStretch(1)
             root.addLayout(copy_row)
 
@@ -638,6 +683,9 @@ def run_gui():
             for c in self.cards.values():
                 c._apply_limit(v)
 
+        def _on_autostart(self, on: bool) -> None:
+            set_autostart(on)
+
         def tick(self) -> None:
             seen = set(list_paths())
             for path in seen - set(self.cards):
@@ -683,7 +731,10 @@ def run_gui():
     w = Main()
     if os.environ.get("FRAMEPACER_TEST_GUI"):
         return app, w, {"Card": Card, "FrameGraph": FrameGraph}  # gancho de teste
-    w.show()
+    if start_hidden(minimized, QSystemTrayIcon.isSystemTrayAvailable()):
+        w.hide()
+    else:
+        w.show()
     return app.exec()
 
 
@@ -696,9 +747,10 @@ def main() -> int:
     ap.add_argument("--default", type=int, metavar="FPS", help="limite inicial dos próximos jogos")
     ap.add_argument("--list", action="store_true", help="lista jogos e FPS atual")
     ap.add_argument("--gui", action="store_true", help="abre a interface gráfica")
+    ap.add_argument("--minimized", action="store_true", help="abre minimizado na bandeja")
     args = ap.parse_args()
-    if args.gui:
-        return run_gui()
+    if args.gui or args.minimized:
+        return run_gui(minimized=args.minimized)
     return cli(args)
 
 
