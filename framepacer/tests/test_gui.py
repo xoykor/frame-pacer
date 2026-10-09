@@ -32,13 +32,25 @@ def make_game(pid, limit, samples_us=()):
 
 
 with mock.patch.object(QSystemTrayIcon, "isSystemTrayAvailable", return_value=False):
-    _, _, ns = f.run_gui()
+    _, w0, ns = f.run_gui()
 Card, FrameGraph = ns["Card"], ns["FrameGraph"]
+
+# tamanhos uniformes (regressão visual: mesma linha, mesma altura)
+w0.show()
+w0.layout().activate()
+hs = (w0.def_spin.height(), w0.save_btn.height(), w0.global_power.height())
+assert hs[0] == hs[1] == hs[2] > 0, hs
+assert w0.copy_btn.height() > 0
+print("header sizes OK")
 
 # toggle: desliga zera, religa restaura
 g = make_game(42421, 60, [16666] * 10)
 card = Card(g)
 assert card.toggle.isChecked(), "limite 60 -> toggle ligado"
+card.show()
+card.layout().activate()
+assert card.spin.height() == card.toggle.height() > 0, (card.spin.height(), card.toggle.height())
+print("card sizes OK")
 card.refresh()
 assert len(card.graph.samples) == 10, "graph deveria ler do .shm"
 card.toggle.click()

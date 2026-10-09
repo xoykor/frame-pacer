@@ -109,7 +109,7 @@ def power_icon():
 
     icon = QIcon()
     icon.addPixmap(_icon_pixmap(24, draw(C_DIM)), QIcon.Normal, QIcon.Off)
-    icon.addPixmap(_icon_pixmap(24, draw(C_ACCENT)), QIcon.Normal, QIcon.On)
+    icon.addPixmap(_icon_pixmap(24, draw(C_ON_TEXT)), QIcon.Normal, QIcon.On)
     return icon
 
 
@@ -438,10 +438,14 @@ def run_gui():
             self.slider = QSlider(Qt.Horizontal)
             self.slider.setRange(0, 360)
             self.spin = make_spin()
+            self.spin.setFixedHeight(38)
             self.slider.valueChanged.connect(self._from_slider)
             self.spin.valueChanged.connect(self._from_spin)
-            self.toggle = QPushButton("⏻")
+            self.toggle = QPushButton()
             self.toggle.setObjectName("powerBtn")
+            self.toggle.setIcon(power_icon())
+            self.toggle.setIconSize(QSize(18, 18))
+            self.toggle.setFixedSize(46, 38)
             self.toggle.setToolTip("Liga/desliga o limite (desligado = sem limite)")
             self.toggle.setCheckable(True)
             self.toggle.toggled.connect(self._on_toggle)
@@ -526,12 +530,13 @@ def run_gui():
 
             self.def_spin = make_spin()
             self.def_spin.setValue(read_default())
+            self.def_spin.setFixedHeight(40)
             self.save_btn = QPushButton()
             self.save_btn.setObjectName("iconBtn")
             self.save_btn.setIcon(floppy_icon())
             self.save_btn.setIconSize(QSize(20, 20))
             self.save_btn.setToolTip("Salvar padrão")
-            self.save_btn.setFixedWidth(46)
+            self.save_btn.setFixedSize(46, 40)
             self.save_btn.clicked.connect(lambda: write_default(self.def_spin.value()))
             self.global_power = QPushButton()
             self.global_power.setObjectName("powerBtn")
@@ -539,7 +544,7 @@ def run_gui():
             self.global_power.setIconSize(QSize(20, 20))
             self.global_power.setToolTip("Liga/desliga o limite de todos os jogos abertos")
             self.global_power.setCheckable(True)
-            self.global_power.setFixedWidth(46)
+            self.global_power.setFixedSize(46, 40)
             self.global_power.toggled.connect(self._on_global_power)
             box = QGroupBox("Limite inicial dos próximos jogos")
             bl = QHBoxLayout(box)
@@ -567,6 +572,7 @@ def run_gui():
             self.copy_btn = QPushButton("Copiar opção de inicialização do Steam")
             self.copy_btn.setIcon(copy_icon())
             self.copy_btn.setIconSize(QSize(18, 18))
+            self.copy_btn.setFixedHeight(38)
             self.copy_btn.clicked.connect(lambda: QApplication.clipboard().setText(launch_option()))
 
             root = QVBoxLayout(self)
