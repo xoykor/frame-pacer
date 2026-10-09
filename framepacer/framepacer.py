@@ -225,6 +225,7 @@ def run_gui():
             self.setAttribute(Qt.WA_TranslucentBackground)
             self.setAttribute(Qt.WA_TransparentForMouseEvents)
             self.setAttribute(Qt.WA_ShowWithoutActivating)
+            self.setWindowTitle("FramePacer Overlay")
             self.label = QLabel("")
             f = QFont(self.label.font())
             f.setPixelSize(12)
