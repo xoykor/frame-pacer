@@ -211,6 +211,12 @@ def ensure_kwin_overlay_rule(path=None) -> str:
         "positionrule": "3",
         "above": "true",
         "aboverule": "3",
+        "skiptaskbar": "true",
+        "skiptaskbarrule": "3",
+        "skippager": "true",
+        "skippagerrule": "3",
+        "skipswitcher": "true",
+        "skipswitcherrule": "3",
     }
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as fh:

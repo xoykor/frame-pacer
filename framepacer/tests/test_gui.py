@@ -112,6 +112,9 @@ with tempfile.TemporaryDirectory() as td:
     rid = [s for s in c.sections() if s != "General" and c[s].get("Description") == f.KWIN_OVERLAY_RULE_DESC][0]
     assert c[rid].get("position") == "0,0" and c[rid].get("positionrule") == "3", dict(c[rid])
     assert c[rid].get("above") == "true" and c[rid].get("aboverule") == "3", dict(c[rid])
+    assert c[rid].get("skiptaskbar") == "true" and c[rid].get("skiptaskbarrule") == "3", dict(c[rid])
+    assert c[rid].get("skippager") == "true" and c[rid].get("skippagerrule") == "3", dict(c[rid])
+    assert c[rid].get("skipswitcher") == "true" and c[rid].get("skipswitcherrule") == "3", dict(c[rid])
     assert c[rid].get("title") == "FramePacer Overlay", dict(c[rid])
 print("kwin rule OK")
 
