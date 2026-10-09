@@ -4,10 +4,24 @@
 #   Steam:  framepacer-run %command%
 LIB64="@LIBDIR@/libframepacer.so"
 LIB32="@LIBDIR32@/libframepacer.so"
+VKLAYERDIR="@VKLAYERDIR@"
 if [ $# -eq 0 ]; then echo "uso: framepacer-run <comando> [args...]" >&2; exit 2; fi
 export ENABLE_FRAMEPACER=1
+# Garante que o Proton importe as camadas Vulkan do host (já é o default;
+# só reafirma caso o sistema tenha desativado):
+export PRESSURE_VESSEL_IMPORT_VULKAN_LAYERS=1
 add() { case ":$LD_PRELOAD:" in *":$1:"*) ;; *) LD_PRELOAD="$1${LD_PRELOAD:+:$LD_PRELOAD}" ;; esac; }
+add_layer() { case ":$VK_ADD_LAYER_PATH:" in *":$1:"*) ;; *) VK_ADD_LAYER_PATH="$1${VK_ADD_LAYER_PATH:+:$VK_ADD_LAYER_PATH}" ;; esac; }
 [ -r "$LIB32" ] && add "$LIB32"
 [ -r "$LIB64" ] && add "$LIB64"
+# Instalação user-level, visível dentro do container Proton (o pressure-vessel
+# reescreve /usr via /run/host, mas ~/.local passa direto):
+[ -r "$HOME/.local/lib32/libframepacer.so" ] && add "$HOME/.local/lib32/libframepacer.so"
+[ -r "$HOME/.local/lib/libframepacer.so" ] && add "$HOME/.local/lib/libframepacer.so"
+# Manifesto da camada fora dos dirs mascarados pelo container (VK_ADD_LAYER_PATH atravessa):
+[ -f "$VKLAYERDIR/framepacer.json" ] && add_layer "$VKLAYERDIR"
+ULAYER="${XDG_DATA_HOME:-$HOME/.local/share}/framepacer/vk-layer"
+[ -f "$ULAYER/framepacer.json" ] && add_layer "$ULAYER"
 export LD_PRELOAD
+[ -n "$VK_ADD_LAYER_PATH" ] && export VK_ADD_LAYER_PATH
 exec "$@"

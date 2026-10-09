@@ -30,11 +30,20 @@ PRESETS = (30, 60, 90, 120, 144, 165)
 
 
 def base_dir() -> str:
+    """Onde ficam os arquivos de controle. Em ~/.local/state para continuar
+    visível dentro do container dos jogos Proton (o pressure-vessel mascara
+    $XDG_RUNTIME_DIR e os dirs vulkan/implicit_layer.d, mas compartilha $HOME)."""
     d = os.environ.get("FRAMEPACER_DIR")
     if not d:
-        xdg = os.environ.get("XDG_RUNTIME_DIR")
-        d = os.path.join(xdg, "framepacer") if xdg else f"/tmp/framepacer-{os.getuid()}"
+        state = os.environ.get("XDG_STATE_HOME") or os.path.join(os.path.expanduser("~"), ".local", "state")
+        d = os.path.join(state, "framepacer")
     return d
+
+
+def legacy_dir() -> str:
+    """Local antigo (antes do suporte a Proton); só leitura do `default` na migração."""
+    xdg = os.environ.get("XDG_RUNTIME_DIR")
+    return os.path.join(xdg, "framepacer") if xdg else f"/tmp/framepacer-{os.getuid()}"
 
 
 def default_file() -> str:
@@ -42,11 +51,13 @@ def default_file() -> str:
 
 
 def read_default() -> int:
-    try:
-        with open(default_file()) as f:
-            return max(0, int(f.read().strip() or 0))
-    except (OSError, ValueError):
-        return 0
+    for d in (base_dir(), legacy_dir()):
+        try:
+            with open(os.path.join(d, "default")) as f:
+                return max(0, int(f.read().strip() or 0))
+        except (OSError, ValueError):
+            continue
+    return 0
 
 
 def write_default(value: int) -> None:
@@ -88,8 +99,18 @@ class Game:
         fresh = hb > 0 and (time.monotonic_ns() - hb) < 2_500_000_000
         return x100 / 100.0, fresh
 
+    def proc_alive(self) -> bool:
+        return os.path.exists(f"/proc/{self.pid}")
+
+    def hb_fresh(self) -> bool:
+        try:
+            return self.fps()[1]
+        except Exception:
+            return False
+
     def alive(self) -> bool:
-        return os.path.exists(f"/proc/{self.pid}") and os.path.exists(self.path)
+        # Jogo em container Proton pode ter PID invisível no host: vale o heartbeat.
+        return os.path.exists(self.path) and (self.proc_alive() or self.hb_fresh())
 
     def close(self) -> None:
         try:
@@ -107,21 +128,33 @@ def list_paths():
         return []
 
 
+STALE_UNLINK_AGE = 15.0  # só remove .shm sem /proc e sem heartbeat após essa carência (jogo iniciando)
+
+
 def open_game(path: str):
     try:
         pid = int(os.path.basename(path)[:-4])
     except ValueError:
         return None
-    if not os.path.exists(f"/proc/{pid}"):  # sobrou de um jogo que fechou/crashou
+    try:
+        game = Game(path, pid)
+    except (OSError, ValueError):
+        return None
+    if game.proc_alive() or game.hb_fresh():
+        return game
+    try:
+        age = time.time() - os.path.getmtime(path)  # jogo em container ainda iniciando?
+    except OSError:
+        game.close()
+        return None
+    if age > STALE_UNLINK_AGE:  # sobrou de um jogo que fechou/crashou
+        game.close()
         try:
             os.unlink(path)
         except OSError:
             pass
         return None
-    try:
-        return Game(path, pid)
-    except (OSError, ValueError):
-        return None
+    return game
 
 
 # --------------------------------------------------------------------------- CLI

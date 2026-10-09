@@ -80,6 +80,7 @@ struct Pacer {
     uint64_t next_ns = 0;
     uint64_t win_start = 0;
     uint32_t win_frames = 0;
+    uint64_t last_check_ns = 0;  // última verificação de que o .shm ainda existe
     uint64_t spin_ns = 200000;  // espera ativa nos últimos 200 µs (precisão)
 };
 
@@ -97,26 +98,52 @@ inline uint64_t now_ns() {
     return uint64_t(ts.tv_sec) * 1000000000ull + uint64_t(ts.tv_nsec);
 }
 
-int read_int_file(const std::string& path, int fallback) {
+bool try_read_int_file(const std::string& path, int* out) {
     FILE* f = fopen(path.c_str(), "r");
-    if (!f) return fallback;
-    int v = fallback;
-    if (fscanf(f, "%d", &v) != 1) v = fallback;
+    if (!f) return false;
+    int v = 0;
+    bool ok = (fscanf(f, "%d", &v) == 1);
     fclose(f);
-    return v;
+    if (ok) *out = v;
+    return ok;
 }
 
-void init_once() {
+// mkdir -p: o dir padrão (~/.local/state/framepacer) pode ainda não existir.
+bool mkpath(const std::string& dir) {
+    std::string cur;
+    for (char c : dir) {
+        cur += c;
+        if (c == '/' && cur.size() > 1) {
+            if (mkdir(cur.c_str(), 0700) != 0 && errno != EEXIST) return false;
+        }
+    }
+    if (!cur.empty() && mkdir(cur.c_str(), 0700) != 0 && errno != EEXIST) return false;
+    return true;
+}
+
+// Dir compartilhado com GUI/CLI. Em ~/.local/state para atravessar o container
+// dos jogos Proton (o pressure-vessel mascara $XDG_RUNTIME_DIR e as pastas
+// vulkan/implicit_layer.d, mas compartilha o $HOME).
+std::string shared_dir() {
+    if (const char* e = getenv("FRAMEPACER_DIR"); e && *e) return e;
+    if (const char* s = getenv("XDG_STATE_HOME"); s && *s) return std::string(s) + "/framepacer";
+    if (const char* h = getenv("HOME"); h && *h) return std::string(h) + "/.local/state/framepacer";
+    if (const char* xdg = getenv("XDG_RUNTIME_DIR"); xdg && *xdg) return std::string(xdg) + "/framepacer";
+    return "/tmp/framepacer-" + std::to_string(getuid());
+}
+
+// Local antigo (antes do suporte a Proton); só leitura do "default" na migração.
+std::string legacy_dir() {
+    if (const char* xdg = getenv("XDG_RUNTIME_DIR"); xdg && *xdg) return std::string(xdg) + "/framepacer";
+    return "/tmp/framepacer-" + std::to_string(getuid());
+}
+
+void do_init() {
     Pacer& g = pacer();
     if (const char* d = getenv("DISABLE_FRAMEPACER"); d && *d && *d != '0') return;
 
-    std::string dir;
-    const char* env_dir = getenv("FRAMEPACER_DIR");
-    const char* xdg = getenv("XDG_RUNTIME_DIR");
-    if (env_dir && *env_dir) dir = env_dir;
-    else if (xdg && *xdg) dir = std::string(xdg) + "/framepacer";
-    else dir = "/tmp/framepacer-" + std::to_string(getuid());
-    mkdir(dir.c_str(), 0700);
+    const std::string dir = shared_dir();
+    if (!mkpath(dir)) return;
 
     if (const char* spin = getenv("FRAMEPACER_SPIN_US")) {
         long long us = atoll(spin);
@@ -148,7 +175,9 @@ void init_once() {
     }
 
     // Limite inicial: FRAMEPACER_FPS > arquivo "default" (definido na GUI) > sem limite
-    int initial = read_int_file(dir + "/default", 0);
+    int initial = 0;
+    if (!try_read_int_file(dir + "/default", &initial))
+        try_read_int_file(legacy_dir() + "/default", &initial);  // migração do local antigo
     if (const char* e = getenv("FRAMEPACER_FPS")) initial = atoi(e);
     s->limit.store(initial, std::memory_order_relaxed);
 
@@ -158,6 +187,26 @@ void init_once() {
 
     snprintf(g_shm_path, sizeof g_shm_path, "%s", path.c_str());
     std::atexit([] { if (g_shm_path[0]) unlink(g_shm_path); });
+}
+
+void init_once() { do_init(); }
+
+// A GUI remove .shm de jogos que parecem mortos; se este processo segue vivo
+// (ex.: jogo em container que ficou um tempo sem apresentar), recria o arquivo.
+void reinit_if_unlinked(uint64_t now) {
+    Pacer& g = pacer();
+    if (now - g.last_check_ns < 5000000000ull) return;
+    std::lock_guard<std::mutex> lk(g.mu);
+    if (now - g.last_check_ns < 5000000000ull) return;  // outra thread já tratou
+    g.last_check_ns = now;
+    if (!g.shm) { do_init(); return; }  // primeira init falhou? tenta de novo (raro)
+    if (g_shm_path[0] && access(g_shm_path, F_OK) == 0) return;
+    munmap(g.shm, sizeof(Shared));
+    g.shm = nullptr;
+    g.next_ns = 0;
+    g.win_start = 0;
+    g.win_frames = 0;
+    do_init();
 }
 
 void sleep_until(uint64_t target, uint64_t spin) {
@@ -175,6 +224,7 @@ void sleep_until(uint64_t target, uint64_t spin) {
 void pace(uint32_t api) {
     Pacer& g = pacer();
     std::call_once(g.once, init_once);
+    reinit_if_unlinked(now_ns());
     if (!g.shm) return;
     if (!(g.shm->api_mask & api)) __atomic_fetch_or(&g.shm->api_mask, api, __ATOMIC_RELAXED);
 

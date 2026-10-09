@@ -36,7 +36,17 @@ make install PREFIX=$HOME/.local
 sudo make install-lib32
 ```
 
-O que `make install` coloca no sistema (`framepacer/Makefile:22-31`):
+## Jogos Proton (Satisfactory, Detroit, ...)
+
+O container do Proton (pressure-vessel) esconde `/usr` e `/run` do jogo, então além da instalação normal faça também a instalação user-level (sem sudo) — ela põe a biblioteca e o manifesto da camada em `~/.local`, que o container enxerga:
+
+```sh
+make install PREFIX=$HOME/.local
+```
+
+A opção de inicialização continua `framepacer-run %command%`. Reinicie o jogo após atualizar.
+
+O que `make install` coloca no sistema (veja `framepacer/Makefile`):
 
 | Artefato | Destino |
 |---|---|
@@ -93,7 +103,7 @@ framepacer --gui               # abre a interface gráfica
 |---|---|
 | `FRAMEPACER_FPS=N` | limite inicial (senão usa o padrão salvo na GUI) |
 | `FRAMEPACER_SPIN_US=N` | espera ativa final em µs, padrão `200` (`0` = só dormir) |
-| `FRAMEPACER_DIR=...` | onde ficam os arquivos de controle (padrão `$XDG_RUNTIME_DIR/framepacer`) |
+| `FRAMEPACER_DIR=...` | onde ficam os arquivos de controle (padrão `~/.local/state/framepacer`) |
 | `DISABLE_FRAMEPACER=1` | desativa tudo |
 | `ENABLE_FRAMEPACER=1` | ativa a camada Vulkan implícita |
 
