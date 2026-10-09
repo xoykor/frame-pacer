@@ -14,7 +14,7 @@ from PySide6.QtWidgets import QSystemTrayIcon
 
 def make_shown(tray_available: bool):
     with mock.patch.object(QSystemTrayIcon, "isSystemTrayAvailable", return_value=tray_available):
-        app, w = f.run_gui()
+        app, w, _ = f.run_gui()
     w.show()
     assert w.isVisible()
     return app, w

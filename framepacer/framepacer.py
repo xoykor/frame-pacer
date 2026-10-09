@@ -19,6 +19,8 @@ import time
 MAGIC = 0x43415046  # "FPAC"
 FMT = "<IIIIiIQ32s"  # magic, version, pid, reserved, limit, fps_x100, heartbeat_ns, name
 SIZE = struct.calcsize(FMT)  # 64
+FT_N = 120  # amostras no ring de frame times (protocolo v2)
+FT_SIZE = 320  # 76 + 2*FT_N + padding até múltiplo de 8 (= sizeof Shared no C++)
 OFF_LIMIT, OFF_FPS, OFF_HB = 16, 20, 24
 API_NAMES = ((1, "Vulkan"), (2, "OpenGL (GLX)"), (4, "OpenGL (EGL)"))
 
@@ -73,7 +75,8 @@ class Game:
         self.path, self.pid = path, pid
         self.f = open(path, "r+b")
         try:
-            self.mm = mmap.mmap(self.f.fileno(), SIZE)
+            st_size = os.fstat(self.f.fileno()).st_size
+            self.mm = mmap.mmap(self.f.fileno(), FT_SIZE if st_size >= FT_SIZE else SIZE)
             magic, _ver, _pid, _res, _lim, _fps, _hb, name = struct.unpack_from(FMT, self.mm, 0)
             if magic != MAGIC:
                 raise ValueError("magic inválido")
@@ -98,6 +101,19 @@ class Game:
         hb = struct.unpack_from("<Q", self.mm, OFF_HB)[0]
         fresh = hb > 0 and (time.monotonic_ns() - hb) < 2_500_000_000
         return x100 / 100.0, fresh
+
+    def frame_times_ms(self) -> list:
+        """Intervalos present-a-present, do mais antigo ao mais recente, em ms.
+        [] quando a lib ainda é v1 (sem ring) ou sem amostras."""
+        if len(self.mm) < FT_SIZE:
+            return []
+        head, count = struct.unpack_from("<II", self.mm, 64)
+        count = min(count, FT_N)
+        if count == 0:
+            return []
+        raw = struct.unpack_from(f"<{FT_N}H", self.mm, 76)
+        start = (head - count) % FT_N  # head = próxima posição a escrever
+        return [raw[(start + i) % FT_N] / 1000.0 for i in range(count)]
 
     def proc_alive(self) -> bool:
         return os.path.exists(f"/proc/{self.pid}")
@@ -185,8 +201,8 @@ def cli(args) -> int:
 
 # --------------------------------------------------------------------------- GUI
 def run_gui():
-    from PySide6.QtCore import Qt, QTimer
-    from PySide6.QtGui import QFont, QIcon
+    from PySide6.QtCore import Qt, QTimer, QRectF, QSize
+    from PySide6.QtGui import QFont, QIcon, QColor, QPainter, QPen
     from PySide6.QtWidgets import (QApplication, QFrame, QGroupBox, QHBoxLayout, QLabel, QMenu,
                                    QPushButton, QScrollArea, QSizePolicy, QSlider, QSpinBox,
                                    QSystemTrayIcon, QVBoxLayout, QWidget)
@@ -197,6 +213,82 @@ def run_gui():
         s.setSpecialValueText("Sem limite")
         s.setSuffix(" FPS")
         return s
+
+    class OverlayWindow(QWidget):
+        """Contador de FPS sobre o jogo (canto superior esquerdo, 12px)."""
+
+        def __init__(self):
+            super().__init__(
+                None,
+                Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool | Qt.WindowDoesNotAcceptFocus,
+            )
+            self.setAttribute(Qt.WA_TranslucentBackground)
+            self.setAttribute(Qt.WA_TransparentForMouseEvents)
+            self.setAttribute(Qt.WA_ShowWithoutActivating)
+            self.label = QLabel("")
+            f = QFont(self.label.font())
+            f.setPixelSize(12)
+            self.label.setFont(f)
+            self.label.setStyleSheet("background: rgba(0, 0, 0, 160); color: white; padding: 2px 6px; border-radius: 4px;")
+            lay = QVBoxLayout(self)
+            lay.setContentsMargins(0, 0, 0, 0)
+            lay.addWidget(self.label)
+            try:
+                geo = QApplication.primaryScreen().availableGeometry()
+                self.move(geo.left(), geo.top())
+            except Exception:
+                pass
+
+        def set_lines(self, lines) -> None:
+            self.label.setText("\n".join(
+                f"{name} {fps:.0f}" if fresh else f"{name} —" for name, fps, fresh in lines
+            ))
+
+    class FrameGraph(QWidget):
+        """Barras dos últimos intervalos present-a-present (ms)."""
+
+        def __init__(self):
+            super().__init__()
+            self.setFixedHeight(64)
+            self.samples = []
+            self.target_ms = 0.0
+
+        def set_data(self, samples, target_ms: float) -> None:
+            self.samples = samples
+            self.target_ms = target_ms
+            self.update()
+
+        def sizeHint(self):
+            return QSize(120, 64)
+
+        def paintEvent(self, e) -> None:
+            super().paintEvent(e)
+            p = QPainter(self)
+            p.setRenderHint(QPainter.Antialiasing)
+            w, h = self.width(), self.height()
+            if not self.samples:
+                p.setPen(self.palette().mid().color())
+                p.drawText(self.rect(), Qt.AlignCenter, "coletando frames…")
+                return
+            ymax = max([self.target_ms * 1.5 if self.target_ms > 0 else 0.0] + self.samples + [8.0])
+            top = h - 16
+            n = len(self.samples)
+            bw = w / n
+            accent = self.palette().highlight().color()
+            hot = QColor(224, 92, 92)
+            thr = self.target_ms * 1.5 if self.target_ms > 0 else 25.0
+            for i, v in enumerate(self.samples):
+                bh = min(v / ymax, 1.0) * top
+                p.fillRect(QRectF(i * bw + 0.5, h - bh, bw - 1.0, bh), hot if v > thr else accent)
+            if self.target_ms > 0:
+                y = h - min(self.target_ms / ymax, 1.0) * top
+                p.setPen(QPen(QColor(76, 175, 80), 1, Qt.DashLine))
+                p.drawLine(0, int(y), w, int(y))
+            s = sorted(self.samples)
+            avg = sum(self.samples) / n
+            p95 = s[min(int(n * 0.95), n - 1)]
+            p.setPen(self.palette().mid().color())
+            p.drawText(4, 12, f"média {avg:.1f} ms · p95 {p95:.1f} ms")
 
     class Card(QFrame):
         def __init__(self, game: Game):
@@ -217,6 +309,10 @@ def run_gui():
             self.spin = make_spin()
             self.slider.valueChanged.connect(self._from_slider)
             self.spin.valueChanged.connect(self._from_spin)
+            self.toggle = QPushButton("⏻")
+            self.toggle.setToolTip("Liga/desliga o limite (desligado = sem limite)")
+            self.toggle.setCheckable(True)
+            self.toggle.toggled.connect(self._on_toggle)
 
             presets = QHBoxLayout()
             for p in PRESETS:
@@ -236,11 +332,15 @@ def run_gui():
             mid = QHBoxLayout()
             mid.addWidget(self.slider, 1)
             mid.addWidget(self.spin)
+            mid.addWidget(self.toggle)
+            self.graph = FrameGraph()
             lay = QVBoxLayout(self)
             lay.addLayout(top)
             lay.addLayout(mid)
+            lay.addWidget(self.graph)
             lay.addLayout(presets)
 
+            self._last_limit = game.limit() or 60
             self._set_widgets(game.limit())
             self.refresh()
 
@@ -249,22 +349,35 @@ def run_gui():
                 w.blockSignals(True)
                 w.setValue(val)
                 w.blockSignals(False)
+            self.toggle.blockSignals(True)
+            self.toggle.setChecked(v != 0)
+            self.toggle.blockSignals(False)
+
+        def _apply_limit(self, v: int) -> None:
+            if v > 0:
+                self._last_limit = v
+            self._set_widgets(v)
+            self.game.set_limit(v)
 
         def _from_slider(self, v: int) -> None:
-            self._set_widgets(v)
-            self.game.set_limit(v)
+            self._apply_limit(v)
 
         def _from_spin(self, v: int) -> None:
-            self._set_widgets(v)
-            self.game.set_limit(v)
+            self._apply_limit(v)
+
+        def _on_toggle(self, on: bool) -> None:
+            self._apply_limit(self._last_limit if on else 0)
 
         def refresh(self) -> None:
             lim = self.game.limit()  # pode ter sido alterado pela CLI
+            if lim > 0:
+                self._last_limit = lim
             if lim != self.spin.value() and not (self.slider.isSliderDown() or self.spin.hasFocus()):
                 self._set_widgets(lim)
             self.title.setText(f"<b>{self.game.name}</b> &nbsp;<span style='color:gray'>PID {self.game.pid} · {self.game.api_text()}</span>")
             fps, fresh = self.game.fps()
             self.fps_label.setText(f"{fps:.1f} FPS" if fresh else "— FPS")
+            self.graph.set_data(self.game.frame_times_ms(), (1000.0 / lim) if lim > 0 else 0.0)
 
         def shutdown(self) -> None:
             self.game.close()
@@ -305,12 +418,22 @@ def run_gui():
 
             copy = QPushButton("Copiar opção de inicialização do Steam")
             copy.clicked.connect(lambda: QApplication.clipboard().setText(launch_option()))
+            self.overlay_toggle = QPushButton("Overlay FPS")
+            self.overlay_toggle.setToolTip("Mostra o FPS sobre o jogo (canto superior esquerdo)")
+            self.overlay_toggle.setCheckable(True)
+            self.overlay_toggle.toggled.connect(self._on_overlay_toggle)
+            bottom = QHBoxLayout()
+            bottom.addWidget(copy, 1)
+            bottom.addWidget(self.overlay_toggle)
 
             root = QVBoxLayout(self)
             root.addWidget(box)
             root.addWidget(self.empty)
             root.addWidget(scroll, 1)
-            root.addWidget(copy)
+            root.addLayout(bottom)
+
+            self.overlay_enabled = False
+            self.overlay = OverlayWindow()
 
             self._tray = None
             self._tray_menu = None
@@ -360,6 +483,12 @@ def run_gui():
             else:
                 super().closeEvent(e)
 
+        def _on_overlay_toggle(self, on: bool) -> None:
+            self.overlay_enabled = on
+            if not on:
+                self.overlay.hide()
+            self.tick()
+
         def apply_all(self) -> None:
             for c in self.cards.values():
                 c.spin.setValue(self.def_spin.value())
@@ -382,13 +511,17 @@ def run_gui():
                 else:
                     card.refresh()
             self.empty.setVisible(not self.cards)
+            self.overlay.set_lines([
+                (c.game.name, *c.game.fps()) for c in self.cards.values()
+            ])
+            self.overlay.setVisible(self.overlay_enabled and bool(self.cards))
 
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("FramePacer")
     app.setDesktopFileName("framepacer")  # casa com o framepacer.desktop no Wayland
     w = Main()
     if os.environ.get("FRAMEPACER_TEST_GUI"):
-        return app, w  # gancho de teste (sem mostrar nem entrar no loop)
+        return app, w, {"Card": Card, "FrameGraph": FrameGraph, "OverlayWindow": OverlayWindow}  # gancho de teste
     w.show()
     return app.exec()
 

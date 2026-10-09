@@ -2,6 +2,9 @@
 #include <vulkan/vulkan.h>
 #include <vulkan/vk_layer.h>
 #include <dlfcn.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -72,6 +75,29 @@ int main(int, char** argv) {
     phase(script, 30, 45, 28.5, 31.5);       // reduzido em tempo real (~1,5 s)
     phase(script, 0, 200000, 20000, 1e12);   // sem limite
     char cmd[512]; snprintf(cmd, sizeof cmd, "python3 %s --list", script); (void)!system(cmd);
+    {  // ring de frame times (protocolo v2): tamanho, versão, head/count
+        const char* dir = getenv("FRAMEPACER_DIR");
+        char p[512];
+        snprintf(p, sizeof p, "%s/%d.shm", dir && *dir ? dir : "/tmp", (int)getpid());
+        uint8_t buf[80] = {0};
+        FILE* f = fopen(p, "rb");
+        size_t n = f ? fread(buf, 1, sizeof buf, f) : 0;
+        if (f) fclose(f);
+        uint32_t magic = 0, version = 0, head = 0, count = 0;
+        long sz = -1;
+        if (n >= 76) {
+            struct stat st;
+            if (stat(p, &st) == 0) sz = (long)st.st_size;
+            memcpy(&magic, buf, 4);
+            memcpy(&version, buf + 4, 4);
+            memcpy(&head, buf + 64, 4);
+            memcpy(&count, buf + 68, 4);
+        }
+        bool ok = n >= 76 && sz >= 320 && magic == 0x43415046 && version == 2 &&
+                  head > 0 && count > 0 && count <= 120;
+        printf("[%s] ring frame-times: size=%ld head=%u count=%u\n", ok ? "OK" : "FALHOU", sz, head, count);
+        if (!ok) failures++;
+    }
     printf(failures ? "\nRESULTADO: FALHOU\n" : "\nRESULTADO: tudo OK (%d presents)\n", present_calls);
     return failures ? 1 : 0;
 }

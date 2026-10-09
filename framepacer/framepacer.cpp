@@ -61,17 +61,24 @@ namespace {
 constexpr uint32_t kMagic = 0x43415046;  // "FPAC" (little-endian)
 enum : uint32_t { API_VULKAN = 1, API_GLX = 2, API_EGL = 4 };
 
+constexpr size_t FT_N = 120;  // amostras no ring de frame times
+
 struct Shared {
     uint32_t magic;
-    uint32_t version;
+    uint32_t version;                      // 2 (v1 = 64 bytes, sem ring)
     uint32_t pid;
-    uint32_t api_mask;                   // bits API_* já vistos neste processo
-    std::atomic<int32_t> limit;          // FPS alvo; <= 0 = sem limite
-    std::atomic<uint32_t> fps_x100;      // FPS medido * 100
-    std::atomic<uint64_t> heartbeat_ns;  // CLOCK_MONOTONIC da última medição
+    uint32_t api_mask;                     // bits API_* já vistos neste processo
+    std::atomic<int32_t> limit;            // FPS alvo; <= 0 = sem limite
+    std::atomic<uint32_t> fps_x100;        // FPS medido * 100
+    std::atomic<uint64_t> heartbeat_ns;    // CLOCK_MONOTONIC da última medição
     char name[32];
+    std::atomic<uint32_t> ft_head;         // próxima posição do ring
+    uint32_t ft_count;                     // amostras válidas (<= FT_N; só a lib escreve)
+    uint16_t ft_pad[2];
+    std::atomic<uint16_t> ft[FT_N];        // intervalos present-a-present, em µs (teto 65535)
 };
-static_assert(sizeof(Shared) == 64, "layout do Shared mudou");
+// 76 + 2*FT_N sofre padding até múltiplo de 8 (alinhamento do atomic<uint64_t>)
+static_assert(sizeof(Shared) == ((76 + 2 * FT_N + 7) & ~size_t(7)), "layout do Shared mudou");
 
 struct Pacer {
     std::once_flag once;
@@ -81,6 +88,7 @@ struct Pacer {
     uint64_t win_start = 0;
     uint32_t win_frames = 0;
     uint64_t last_check_ns = 0;  // última verificação de que o .shm ainda existe
+    uint64_t last_present_ns = 0;  // present anterior (p/ o ring de frame times)
     uint64_t spin_ns = 200000;  // espera ativa nos últimos 200 µs (precisão)
 };
 
@@ -161,7 +169,7 @@ void do_init() {
     if (p == MAP_FAILED) return;
 
     auto* s = static_cast<Shared*>(p);
-    s->version = 1;
+    s->version = 2;
     s->pid = uint32_t(getpid());
 
     FILE* comm = fopen("/proc/self/comm", "r");
@@ -206,6 +214,7 @@ void reinit_if_unlinked(uint64_t now) {
     g.next_ns = 0;
     g.win_start = 0;
     g.win_frames = 0;
+    g.last_present_ns = 0;
     do_init();
 }
 
@@ -229,6 +238,16 @@ void pace(uint32_t api) {
     if (!(g.shm->api_mask & api)) __atomic_fetch_or(&g.shm->api_mask, api, __ATOMIC_RELAXED);
 
     const uint64_t now = now_ns();
+    // Frame time real: intervalo desde o present anterior (antes da espera — o que o app viu).
+    if (g.last_present_ns != 0) {
+        uint64_t dt = (now - g.last_present_ns) / 1000ull;
+        if (dt > 65535) dt = 65535;
+        const uint32_t h = g.shm->ft_head.load(std::memory_order_relaxed);
+        g.shm->ft[h % FT_N].store((uint16_t)dt, std::memory_order_relaxed);
+        g.shm->ft_head.store(h + 1, std::memory_order_relaxed);
+        if (g.shm->ft_count < FT_N) g.shm->ft_count++;
+    }
+    g.last_present_ns = now;
     const int32_t fps = g.shm->limit.load(std::memory_order_relaxed);
     uint64_t wait_until = 0;
 
