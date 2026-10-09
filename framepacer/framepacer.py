@@ -173,6 +173,58 @@ def open_game(path: str):
     return game
 
 
+KWIN_OVERLAY_RULE_DESC = "FramePacer Overlay"
+
+
+def ensure_kwin_overlay_rule(path=None) -> str:
+    """Garante regra do KWin fixando o overlay no canto superior esquerdo e
+    sempre acima (Wayland ignora posição pedida pelo app). Idempotente.
+    Chaves validadas com screenshot real (posição forçada + keep above)."""
+    import configparser
+    import subprocess
+    path = path or os.path.expanduser("~/.config/kwinrulesrc")
+    c = configparser.ConfigParser()
+    c.optionxform = str
+    try:
+        c.read(path)
+    except configparser.Error:
+        pass
+    if "General" not in c:
+        c["General"] = {}
+    rid = None
+    for sec in c.sections():
+        if sec != "General" and c[sec].get("Description") == KWIN_OVERLAY_RULE_DESC:
+            rid = sec
+            break
+    if rid is None:
+        used = [int(s) for s in c.sections() if s != "General" and s.isdigit()]
+        rid = str(max(used, default=0) + 1)
+        ids = [s for s in (c["General"].get("rules") or "").split(",") if s.strip()]
+        if rid not in ids:
+            ids.append(rid)
+        c["General"]["rules"] = ",".join(ids)
+    c[rid] = {
+        "Description": KWIN_OVERLAY_RULE_DESC,
+        "title": "FramePacer Overlay",
+        "titlematch": "2",
+        "position": "0,0",
+        "positionrule": "3",
+        "above": "true",
+        "aboverule": "3",
+    }
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as fh:
+        c.write(fh)
+    qdbus = shutil.which("qdbus6") or shutil.which("qdbus")
+    if qdbus:
+        r = subprocess.run([qdbus, "org.kde.KWin", "/KWin", "reconfigure"],
+                           capture_output=True, text=True, timeout=15)
+        if r.returncode == 0:
+            return "Regra do KWin instalada: overlay fixo no canto superior esquerdo. Desliga e religa o Overlay FPS."
+        return "Regra salva, mas falhou avisar o KWin (rode: qdbus6 org.kde.KWin /KWin reconfigure)."
+    return "Regra salva em kwinrulesrc (qdbus não encontrado; reinicia a sessão)."
+
+
 # --------------------------------------------------------------------------- CLI
 def cli(args) -> int:
     if args.default is not None:
@@ -204,7 +256,7 @@ def run_gui():
     from PySide6.QtCore import Qt, QTimer, QRectF, QSize
     from PySide6.QtGui import QFont, QIcon, QColor, QPainter, QPen
     from PySide6.QtWidgets import (QApplication, QFrame, QGroupBox, QHBoxLayout, QLabel, QMenu,
-                                   QPushButton, QScrollArea, QSizePolicy, QSlider, QSpinBox,
+                                   QMessageBox, QPushButton, QScrollArea, QSizePolicy, QSlider, QSpinBox,
                                    QSystemTrayIcon, QVBoxLayout, QWidget)
 
     def make_spin() -> QSpinBox:
@@ -241,8 +293,9 @@ def run_gui():
                 pass
 
         def set_lines(self, lines) -> None:
+            # Só o número (sem nome do jogo).
             self.label.setText("\n".join(
-                f"{name} {fps:.0f}" if fresh else f"{name} —" for name, fps, fresh in lines
+                f"{fps:.0f}" if fresh else "—" for _name, fps, fresh in lines
             ))
 
     class FrameGraph(QWidget):
@@ -423,9 +476,13 @@ def run_gui():
             self.overlay_toggle.setToolTip("Mostra o FPS sobre o jogo (canto superior esquerdo)")
             self.overlay_toggle.setCheckable(True)
             self.overlay_toggle.toggled.connect(self._on_overlay_toggle)
+            self.kwin_btn = QPushButton("Fixar canto")
+            self.kwin_btn.setToolTip("Cria regra do KWin: overlay sempre no canto superior esquerdo, acima do jogo")
+            self.kwin_btn.clicked.connect(self._on_kwin_fix)
             bottom = QHBoxLayout()
             bottom.addWidget(copy, 1)
             bottom.addWidget(self.overlay_toggle)
+            bottom.addWidget(self.kwin_btn)
 
             root = QVBoxLayout(self)
             root.addWidget(box)
@@ -488,6 +545,13 @@ def run_gui():
             self.overlay_enabled = on
             if not on:
                 self.overlay.hide()
+            self.tick()
+
+        def _on_kwin_fix(self) -> None:
+            msg = ensure_kwin_overlay_rule()
+            QMessageBox.information(self, "FramePacer", msg)
+            self.overlay.deleteLater()  # recria para a regra valer na hora
+            self.overlay = OverlayWindow()
             self.tick()
 
         def apply_all(self) -> None:

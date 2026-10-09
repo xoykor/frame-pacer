@@ -80,7 +80,7 @@ Jogos Proton que só usam DX9–12 também funcionam só com a camada Vulkan:
 ENABLE_FRAMEPACER=1 %command%
 ```
 
-Abra o **FramePacer** pelo menu de aplicativos (ou `framepacer`) para ajustar o limite com sliders, presets e leitura de FPS. Cada jogo mostra gráfico de frame times e botão ⏻ (liga/desliga o limite; desligado = sem limite); o botão **Overlay FPS** exibe um contador 12px sobre o jogo. Fechar a janela (X) minimiza para a bandeja; para encerrar use **Sair** no menu do ícone. Atalhos úteis no KDE (Configurações → Atalhos → Adicionar comando):
+Abra o **FramePacer** pelo menu de aplicativos (ou `framepacer`) para ajustar o limite com sliders, presets e leitura de FPS. Cada jogo mostra gráfico de frame times e botão ⏻ (liga/desliga o limite; desligado = sem limite); o botão **Overlay FPS** exibe só o número do FPS sobre o jogo. No Wayland o app não escolhe a posição da janela: clique **Fixar canto** para criar a regra do KWin (canto superior esquerdo, sempre acima). Fechar a janela (X) minimiza para a bandeja; para encerrar use **Sair** no menu do ícone. Atalhos úteis no KDE (Configurações → Atalhos → Adicionar comando):
 
 ```
 framepacer --set 60
