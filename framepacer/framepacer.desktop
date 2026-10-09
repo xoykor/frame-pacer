@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=FramePacer
+Comment=Limitador de FPS em tempo real
+Exec=framepacer
+Icon=applications-games
+Categories=Game;Utility;
+Terminal=false
+StartupWMClass=framepacer

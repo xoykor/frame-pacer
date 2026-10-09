@@ -1,0 +1,5 @@
+framepacer/build/
+framepacer/build32/
+framepacer/framepacer-run.tmp
+__pycache__/
+*.pyc

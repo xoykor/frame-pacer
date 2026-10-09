@@ -1,0 +1,13 @@
+#!/bin/sh
+# framepacer-run — executa um programa com o FramePacer ativo (Vulkan + OpenGL).
+#   Uso:    framepacer-run <comando> [args...]
+#   Steam:  framepacer-run %command%
+LIB64="@LIBDIR@/libframepacer.so"
+LIB32="@LIBDIR32@/libframepacer.so"
+if [ $# -eq 0 ]; then echo "uso: framepacer-run <comando> [args...]" >&2; exit 2; fi
+export ENABLE_FRAMEPACER=1
+add() { case ":$LD_PRELOAD:" in *":$1:"*) ;; *) LD_PRELOAD="$1${LD_PRELOAD:+:$LD_PRELOAD}" ;; esac; }
+[ -r "$LIB32" ] && add "$LIB32"
+[ -r "$LIB64" ] && add "$LIB64"
+export LD_PRELOAD
+exec "$@"
