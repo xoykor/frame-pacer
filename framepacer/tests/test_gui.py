@@ -3,6 +3,7 @@ import os
 import struct
 import sys
 import tempfile
+import time as _time
 from unittest import mock
 
 sys.argv = ["test_gui"]
@@ -11,6 +12,7 @@ os.environ["QT_QPA_PLATFORM"] = "offscreen"
 os.environ["FRAMEPACER_TEST_GUI"] = "1"
 
 import framepacer as f
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QSystemTrayIcon
 
 TMP = tempfile.mkdtemp(prefix="fp-gui-")
@@ -42,6 +44,21 @@ hs = (w0.def_spin.height(), w0.save_btn.height(), w0.global_power.height())
 assert hs[0] == hs[1] == hs[2] > 0, hs
 assert w0.copy_btn.height() > 0
 print("header sizes OK")
+
+# gráfico atualiza a cada 10ms
+assert w0.timer.interval() == 10, w0.timer.interval()
+assert w0.timer.timerType() == Qt.PreciseTimer
+from PySide6.QtCore import QEventLoop
+calls = []
+_orig_tick = w0.tick
+w0.tick = lambda: (calls.append(1), _orig_tick())
+_loop = QEventLoop()
+w0.timer.timeout.connect(_loop.quit)
+_t0 = _time.monotonic()
+while _time.monotonic() - _t0 < 0.25 and len(calls) < 30:
+    _loop.exec()
+assert len(calls) >= 5, f"loop de refresh não dispara: {len(calls)}"
+print("tick 10ms OK")
 
 # toggle: desliga zera, religa restaura
 g = make_game(42421, 60, [16666] * 10)
@@ -97,8 +114,6 @@ assert "QPushButton" in f.DARK_QSS and "QSlider" in f.DARK_QSS and "#00e5a0" in 
 print("graph OK")
 
 # tick detecta jogo com heartbeat fresco
-import time as _time
-
 OVL = tempfile.mkdtemp(prefix="fp-ovl-")
 opath = os.path.join(OVL, "42431.shm")
 with open(opath, "wb") as fh:
@@ -162,12 +177,15 @@ print("autostart OK")
 # botão iniciar-junto reflete e alterna o arquivo (HOME isolado)
 with tempfile.TemporaryDirectory() as home:
     with mock.patch.dict(os.environ, {"HOME": home}):
-        assert w0.autostart_btn.isCheckable()
         initial = w0.autostart_btn.isChecked()
         w0.autostart_btn.click()
         assert f.autostart_enabled() != initial
         w0.autostart_btn.click()
         assert f.autostart_enabled() == initial
 print("autostart button OK")
+assert w0.autostart_label.text() == "Abrir com\no sistema"
+assert (w0.autostart_btn.width(), w0.autostart_btn.height()) == (52, 28)
+assert not w0.autostart_btn.grab().isNull()
+print("autostart slider OK")
 
 print("GUI TESTS OK")

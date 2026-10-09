@@ -105,6 +105,7 @@ QLabel#cardTitle { font-size: 13pt; font-weight: bold; color: #ececf1; }
 QLabel#apiBadge { background: #2c2c3d; color: #00e5a0; border-radius: 8px; padding: 2px 8px; font-size: 9pt; font-weight: bold; }
 QLabel#fpsBig { font-size: 20pt; font-weight: bold; color: #ececf1; }
 QLabel#emptyLabel { color: #9a9ab0; font-size: 11pt; }
+QLabel#dimLabel { color: #9a9ab0; font-size: 9pt; }
 QWidget#graph { background: #17171f; border: 1px solid #2c2c3d; border-radius: 8px; }
 QPushButton#iconBtn { padding: 6px 8px; }
 """
@@ -560,6 +561,51 @@ def run_gui(minimized: bool = False):
         def shutdown(self) -> None:
             self.game.close()
 
+    class ToggleSwitch(QWidget):
+        """Chave liga/desliga estilo slider (tudo pintado, sem assets)."""
+
+        def __init__(self, on_change=None, checked: bool = False):
+            super().__init__()
+            self.setFixedSize(52, 28)
+            self.setCursor(Qt.PointingHandCursor)
+            self._on = bool(checked)
+            self._cb = on_change
+
+        def isChecked(self) -> bool:
+            return self._on
+
+        def setChecked(self, on: bool) -> None:
+            on = bool(on)
+            if on != self._on:
+                self._on = on
+                self.update()
+                if self._cb is not None:
+                    self._cb(on)
+
+        def click(self) -> None:
+            self.setChecked(not self._on)
+
+        def mousePressEvent(self, e) -> None:
+            self.click()
+
+        def paintEvent(self, e) -> None:
+            super().paintEvent(e)
+            p = QPainter(self)
+            p.setRenderHint(QPainter.Antialiasing)
+            w, h = self.width(), self.height()
+            if self._on:
+                p.setPen(Qt.NoPen)
+                p.setBrush(QColor(C_ACCENT))
+            else:
+                p.setPen(QColor(C_BORDER_HI))
+                p.setBrush(QColor(C_BORDER))
+            p.drawRoundedRect(1, 1, w - 2, h - 2, 13, 13)
+            d = h - 8
+            x = (w - d - 4) if self._on else 4
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(C_ON_TEXT) if self._on else QColor(C_TEXT))
+            p.drawEllipse(int(x), 4, d, d)
+
     class Main(QWidget):
         def __init__(self):
             super().__init__()
@@ -621,11 +667,12 @@ def run_gui(minimized: bool = False):
             copy_row = QHBoxLayout()
             copy_row.addStretch(1)
             copy_row.addWidget(self.copy_btn)
-            self.autostart_btn = QPushButton("Iniciar junto")
+            self.autostart_label = QLabel("Abrir com\no sistema")
+            self.autostart_label.setObjectName("dimLabel")
+            self.autostart_label.setToolTip("Iniciar o FramePacer com o sistema (minimizado na bandeja)")
+            self.autostart_btn = ToggleSwitch(self._on_autostart, checked=autostart_enabled())
             self.autostart_btn.setToolTip("Iniciar o FramePacer com o sistema (minimizado na bandeja)")
-            self.autostart_btn.setCheckable(True)
-            self.autostart_btn.setChecked(autostart_enabled())
-            self.autostart_btn.toggled.connect(self._on_autostart)
+            copy_row.addWidget(self.autostart_label)
             copy_row.addWidget(self.autostart_btn)
             copy_row.addStretch(1)
             root.addLayout(copy_row)
@@ -649,8 +696,9 @@ def run_gui(minimized: bool = False):
                 self._tray_menu = menu
 
             self.timer = QTimer(self)
+            self.timer.setTimerType(Qt.PreciseTimer)
             self.timer.timeout.connect(self.tick)
-            self.timer.start(500)
+            self.timer.start(10)
             self.tick()
 
         def toggle_from_tray(self) -> None:
