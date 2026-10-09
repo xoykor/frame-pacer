@@ -30,6 +30,54 @@ def launch_option() -> str:
     return f"{shutil.which('framepacer-run') or 'framepacer-run'} %command%"
 PRESETS = (30, 60, 90, 120, 144, 165)
 
+# Tema dark gamer (forçado, independe do tema do sistema).
+C_BG = "#14141b"
+C_CARD = "#1e1e29"
+C_GRAPH_BG = "#17171f"
+C_BORDER = "#2c2c3d"
+C_BORDER_HI = "#3a3a4d"
+C_TEXT = "#ececf1"
+C_DIM = "#9a9ab0"
+C_ACCENT = "#00e5a0"
+C_ACCENT_HI = "#4dffc3"
+C_HOT = "#ff5470"
+C_TARGET = "#4caf50"
+C_ON_TEXT = "#101014"
+
+DARK_QSS = """
+QWidget { color: #ececf1; }
+QToolTip { background: #23232f; color: #ececf1; border: 1px solid #3a3a4d; }
+QGroupBox { border: 1px solid #2c2c3d; border-radius: 10px; margin-top: 14px; font-weight: bold; color: #9a9ab0; background: #1e1e29; }
+QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 4px; }
+QScrollArea { background: transparent; border: none; }
+QScrollArea > QWidget { background: transparent; }
+QWidget#holder { background: transparent; }
+QScrollBar:vertical { background: transparent; width: 10px; margin: 2px; }
+QScrollBar::handle:vertical { background: #2c2c3d; min-height: 30px; border-radius: 5px; }
+QScrollBar::handle:vertical:hover { background: #3a3a4d; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
+QPushButton { background: #2c2c3d; color: #ececf1; border: 1px solid #3a3a4d; border-radius: 8px; padding: 6px 12px; font-weight: bold; }
+QPushButton:hover { background: #38384e; border-color: #00e5a0; }
+QPushButton:pressed { background: #1a1a24; border-color: #00e5a0; }
+QPushButton#powerBtn { font-size: 15pt; padding: 2px 12px; }
+QPushButton#powerBtn:!checked { color: #9a9ab0; }
+QPushButton#powerBtn:checked { background: #00e5a0; color: #101014; border-color: #00e5a0; }
+QPushButton#powerBtn:checked:hover { background: #4dffc3; }
+QSpinBox { background: #23232f; color: #ececf1; border: 1px solid #3a3a4d; border-radius: 8px; padding: 4px 6px; selection-background-color: #00e5a0; selection-color: #101014; }
+QSpinBox::up-button, QSpinBox::down-button { width: 18px; background: transparent; border: none; }
+QSlider::groove:horizontal { background: #2c2c3d; height: 6px; border-radius: 3px; }
+QSlider::sub-page:horizontal { background: #00e5a0; border-radius: 3px; }
+QSlider::handle:horizontal { background: #00e5a0; width: 16px; height: 16px; margin: -5px 0; border-radius: 8px; }
+QSlider::handle:horizontal:hover { background: #4dffc3; }
+QFrame#card { background: #1e1e29; border: 1px solid #2c2c3d; border-radius: 12px; }
+QLabel#cardTitle { font-size: 13pt; font-weight: bold; color: #ececf1; }
+QLabel#apiBadge { background: #2c2c3d; color: #00e5a0; border-radius: 8px; padding: 2px 8px; font-size: 9pt; font-weight: bold; }
+QLabel#fpsBig { font-size: 20pt; font-weight: bold; color: #ececf1; }
+QLabel#emptyLabel { color: #9a9ab0; font-size: 11pt; }
+QWidget#graph { background: #17171f; border: 1px solid #2c2c3d; border-radius: 8px; }
+"""
+
 
 def base_dir() -> str:
     """Onde ficam os arquivos de controle. Em ~/.local/state para continuar
@@ -202,7 +250,7 @@ def cli(args) -> int:
 # --------------------------------------------------------------------------- GUI
 def run_gui():
     from PySide6.QtCore import Qt, QTimer, QRectF, QSize
-    from PySide6.QtGui import QFont, QIcon, QColor, QPainter, QPen
+    from PySide6.QtGui import QIcon, QColor, QPainter, QPen, QPalette, QLinearGradient, QPainterPath
     from PySide6.QtWidgets import (QApplication, QFrame, QGroupBox, QHBoxLayout, QLabel, QMenu,
                                    QPushButton, QScrollArea, QSizePolicy, QSlider, QSpinBox,
                                    QSystemTrayIcon, QVBoxLayout, QWidget)
@@ -215,11 +263,12 @@ def run_gui():
         return s
 
     class FrameGraph(QWidget):
-        """Barras dos últimos intervalos present-a-present (ms)."""
+        """Linha dos últimos intervalos present-a-present (ms), com degradê até a borda."""
 
         def __init__(self):
             super().__init__()
-            self.setFixedHeight(64)
+            self.setObjectName("graph")
+            self.setFixedHeight(76)
             self.samples = []
             self.target_ms = 0.0
 
@@ -229,49 +278,86 @@ def run_gui():
             self.update()
 
         def sizeHint(self):
-            return QSize(120, 64)
+            return QSize(120, 76)
 
         def paintEvent(self, e) -> None:
             super().paintEvent(e)
             p = QPainter(self)
             p.setRenderHint(QPainter.Antialiasing)
             w, h = self.width(), self.height()
+            pad_l, pad_r, pad_t, pad_b = 6, 6, 16, 6
             if not self.samples:
-                p.setPen(self.palette().mid().color())
+                p.setPen(QColor(C_DIM))
                 p.drawText(self.rect(), Qt.AlignCenter, "coletando frames…")
                 return
-            ymax = max([self.target_ms * 1.5 if self.target_ms > 0 else 0.0] + self.samples + [8.0])
-            top = h - 16
             n = len(self.samples)
-            bw = w / n
-            accent = self.palette().highlight().color()
-            hot = QColor(224, 92, 92)
+            plot_w = max(w - pad_l - pad_r, 1)
+            plot_h = max(h - pad_t - pad_b, 1)
+            ymax = max([self.target_ms * 1.5 if self.target_ms > 0 else 0.0] + self.samples + [8.0])
+
+            def xy(i, v):
+                x = pad_l + (i / (n - 1) if n > 1 else 0.5) * plot_w
+                y = pad_t + plot_h - min(v / ymax, 1.0) * plot_h
+                return x, y
+
+            accent = QColor(C_ACCENT)
+            line = QPainterPath()
+            x0, y0 = xy(0, self.samples[0])
+            line.moveTo(x0, y0)
+            for i in range(1, n):
+                line.lineTo(*xy(i, self.samples[i]))
+            if n > 1:
+                base = pad_t + plot_h
+                xl, _ = xy(n - 1, 0)
+                fill = QPainterPath(line)
+                fill.lineTo(xl, base)
+                fill.lineTo(x0, base)
+                fill.closeSubpath()
+                grad = QLinearGradient(0, pad_t, 0, pad_t + plot_h)
+                top = QColor(C_ACCENT)
+                top.setAlpha(170)
+                bottom = QColor(C_ACCENT)
+                bottom.setAlpha(0)
+                grad.setColorAt(0, top)
+                grad.setColorAt(1, bottom)
+                p.fillPath(fill, grad)
+            pen = QPen(accent, 2)
+            pen.setCapStyle(Qt.RoundCap)
+            pen.setJoinStyle(Qt.RoundJoin)
+            p.setPen(pen)
+            p.drawPath(line)
             thr = self.target_ms * 1.5 if self.target_ms > 0 else 25.0
-            for i, v in enumerate(self.samples):
-                bh = min(v / ymax, 1.0) * top
-                p.fillRect(QRectF(i * bw + 0.5, h - bh, bw - 1.0, bh), hot if v > thr else accent)
             if self.target_ms > 0:
-                y = h - min(self.target_ms / ymax, 1.0) * top
-                p.setPen(QPen(QColor(76, 175, 80), 1, Qt.DashLine))
-                p.drawLine(0, int(y), w, int(y))
+                y = pad_t + plot_h - min(self.target_ms / ymax, 1.0) * plot_h
+                p.setPen(QPen(QColor(C_TARGET), 1, Qt.DashLine))
+                p.drawLine(pad_l, int(y), w - pad_r, int(y))
+            hot = QColor(C_HOT)
+            for i, v in enumerate(self.samples):
+                if v > thr:
+                    x, y = xy(i, v)
+                    p.setPen(Qt.NoPen)
+                    p.setBrush(hot)
+                    p.drawEllipse(int(x) - 2, int(y) - 2, 5, 5)
             s = sorted(self.samples)
             avg = sum(self.samples) / n
             p95 = s[min(int(n * 0.95), n - 1)]
-            p.setPen(self.palette().mid().color())
-            p.drawText(4, 12, f"média {avg:.1f} ms · p95 {p95:.1f} ms")
+            p.setPen(QColor(C_DIM))
+            p.drawText(pad_l, 12, f"média {avg:.1f} ms · p95 {p95:.1f} ms")
 
     class Card(QFrame):
         def __init__(self, game: Game):
             super().__init__()
             self.game = game
             self.setFrameShape(QFrame.StyledPanel)
+            self.setObjectName("card")
 
-            self.title = title = QLabel(f"<b>{game.name}</b> &nbsp;<span style='color:gray'>PID {game.pid} · {game.api_text()}</span>")
+            self.name_label = QLabel(f"<b>{game.name}</b> &nbsp;<span style='color:#9a9ab0'>PID {game.pid}</span>")
+            self.name_label.setObjectName("cardTitle")
+            self.name_label.setTextFormat(Qt.RichText)
+            self.api_badge = QLabel(game.api_text())
+            self.api_badge.setObjectName("apiBadge")
             self.fps_label = QLabel("— FPS")
-            f = QFont(self.fps_label.font())
-            f.setPointSize(f.pointSize() + 6)
-            f.setBold(True)
-            self.fps_label.setFont(f)
+            self.fps_label.setObjectName("fpsBig")
             self.fps_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
             self.slider = QSlider(Qt.Horizontal)
@@ -280,6 +366,7 @@ def run_gui():
             self.slider.valueChanged.connect(self._from_slider)
             self.spin.valueChanged.connect(self._from_spin)
             self.toggle = QPushButton("⏻")
+            self.toggle.setObjectName("powerBtn")
             self.toggle.setToolTip("Liga/desliga o limite (desligado = sem limite)")
             self.toggle.setCheckable(True)
             self.toggle.toggled.connect(self._on_toggle)
@@ -297,7 +384,9 @@ def run_gui():
             presets.addWidget(off)
 
             top = QHBoxLayout()
-            top.addWidget(title, 1)
+            top.addWidget(self.name_label)
+            top.addWidget(self.api_badge)
+            top.addStretch(1)
             top.addWidget(self.fps_label)
             mid = QHBoxLayout()
             mid.addWidget(self.slider, 1)
@@ -344,7 +433,8 @@ def run_gui():
                 self._last_limit = lim
             if lim != self.spin.value() and not (self.slider.isSliderDown() or self.spin.hasFocus()):
                 self._set_widgets(lim)
-            self.title.setText(f"<b>{self.game.name}</b> &nbsp;<span style='color:gray'>PID {self.game.pid} · {self.game.api_text()}</span>")
+            self.name_label.setText(f"<b>{self.game.name}</b> &nbsp;<span style='color:#9a9ab0'>PID {self.game.pid}</span>")
+            self.api_badge.setText(self.game.api_text())
             fps, fresh = self.game.fps()
             self.fps_label.setText(f"{fps:.1f} FPS" if fresh else "— FPS")
             self.graph.set_data(self.game.frame_times_ms(), (1000.0 / lim) if lim > 0 else 0.0)
@@ -372,6 +462,7 @@ def run_gui():
             bl.addWidget(apply_all)
 
             holder = QWidget()
+            holder.setObjectName("holder")
             self.list_layout = QVBoxLayout(holder)
             self.list_layout.addStretch(1)
             scroll = QScrollArea()
@@ -382,6 +473,7 @@ def run_gui():
             self.empty = QLabel(
                 "Nenhum jogo detectado.\n\nInicie o jogo com <b>framepacer-run</b> (Vulkan e OpenGL).\n"
                 f"No Steam, em Opções de inicialização:\n<tt>{launch_option()}</tt>")
+            self.empty.setObjectName("emptyLabel")
             self.empty.setAlignment(Qt.AlignCenter)
             self.empty.setTextFormat(Qt.RichText)
             self.empty.setWordWrap(True)
@@ -469,6 +561,21 @@ def run_gui():
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("FramePacer")
     app.setDesktopFileName("framepacer")  # casa com o framepacer.desktop no Wayland
+    app.setStyle("Fusion")
+    _dark = {
+        QPalette.Window: C_BG, QPalette.WindowText: C_TEXT,
+        QPalette.Base: C_CARD, QPalette.AlternateBase: C_GRAPH_BG,
+        QPalette.Text: C_TEXT, QPalette.Button: C_CARD,
+        QPalette.ButtonText: C_TEXT, QPalette.Highlight: C_ACCENT,
+        QPalette.HighlightedText: C_ON_TEXT, QPalette.ToolTipBase: C_CARD,
+        QPalette.ToolTipText: C_TEXT, QPalette.Mid: C_DIM,
+        QPalette.Dark: C_BG, QPalette.Light: C_BORDER_HI,
+    }
+    _pal = app.palette()
+    for _role, _color in _dark.items():
+        _pal.setColor(_role, QColor(_color))
+    app.setPalette(_pal)
+    app.setStyleSheet(DARK_QSS)
     w = Main()
     if os.environ.get("FRAMEPACER_TEST_GUI"):
         return app, w, {"Card": Card, "FrameGraph": FrameGraph}  # gancho de teste

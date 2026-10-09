@@ -27,6 +27,7 @@ def make_game(pid, limit, samples_us=()):
         fh.write(struct.pack("<II", n % f.FT_N, min(n, f.FT_N)))
         fh.write(struct.pack("<HH", 0, 0))
         fh.write(struct.pack(f"<{f.FT_N}H", *ring))
+        fh.write(b"\0" * (f.FT_SIZE - fh.tell()))
     return f.Game(path, pid)
 
 
@@ -38,6 +39,8 @@ Card, FrameGraph = ns["Card"], ns["FrameGraph"]
 g = make_game(42421, 60, [16666] * 10)
 card = Card(g)
 assert card.toggle.isChecked(), "limite 60 -> toggle ligado"
+card.refresh()
+assert len(card.graph.samples) == 10, "graph deveria ler do .shm"
 card.toggle.click()
 assert g.limit() == 0 and not card.toggle.isChecked(), "desligar zera o limite"
 card.toggle.click()
@@ -55,9 +58,27 @@ print("toggle OK")
 fg = FrameGraph()
 fg.set_data([16.6, 16.7, 33.0, 16.5], 16.6)
 assert len(fg.samples) == 4
+fg.resize(300, 76)
 fg.show()
 fg.repaint()
-assert not fg.grab().isNull()
+img = fg.grab().toImage()
+
+def accent_pixels(image):
+    n = 0
+    for y in range(0, image.height(), 2):
+        for x in range(0, image.width(), 2):
+            p = image.pixelColor(x, y)
+            if p.green() > 180 and p.red() < 100 and p.blue() > 100:
+                n += 1
+    return n
+
+assert accent_pixels(img) > 20, "linha do gráfico deveria usar o acento"
+fg2 = FrameGraph()
+fg2.resize(300, 76)
+fg2.show()
+fg2.repaint()
+assert accent_pixels(fg2.grab().toImage()) == 0, "gráfico vazio não tem acento"
+assert "QPushButton" in f.DARK_QSS and "QSlider" in f.DARK_QSS and "#00e5a0" in f.DARK_QSS
 print("graph OK")
 
 # tick detecta jogo com heartbeat fresco
