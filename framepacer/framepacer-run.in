@@ -10,7 +10,7 @@ export ENABLE_FRAMEPACER=1
 # Garante que o Proton importe as camadas Vulkan do host (já é o default;
 # só reafirma caso o sistema tenha desativado):
 export PRESSURE_VESSEL_IMPORT_VULKAN_LAYERS=1
-add() { case ":$LD_PRELOAD:" in *":$1:"*) ;; *) LD_PRELOAD="$1${LD_PRELOAD:+:$LD_PRELOAD}" ;; esac; }
+add() { case ":$LD_PRELOAD:" in *":$1:"*) ;; *) LD_PRELOAD="${LD_PRELOAD:+$LD_PRELOAD:}$1" ;; esac; }
 add_layer() { case ":$VK_ADD_LAYER_PATH:" in *":$1:"*) ;; *) VK_ADD_LAYER_PATH="$1${VK_ADD_LAYER_PATH:+:$VK_ADD_LAYER_PATH}" ;; esac; }
 [ -r "$LIB32" ] && add "$LIB32"
 [ -r "$LIB64" ] && add "$LIB64"

@@ -560,11 +560,18 @@ void* eglGetProcAddress(const char* name) {
 
 // GLFW/SDL/Wine carregam libGL/libEGL com dlopen + dlsym(handle, ...), o que
 // escaparia da interposição normal. Por isso interceptamos o próprio dlsym.
-// Limitação: chamadas dlsym(RTLD_NEXT, ...) de OUTRAS bibliotecas passam direto
-// (por isso não combine com outros interpositores no LD_PRELOAD, ex.: MangoHud).
+// Guard de reentrância por thread evita loops com interpositores pré-existentes
+// que usam dlsym durante sua inicialização (ex.: Steam Overlay / MangoHud).
+thread_local bool tl_in_dlsym = false;
+
 void* fp_dlsym(void* handle, const char* name) {
     DlsymFn rd = real_dlsym();
     if (!rd) return nullptr;
+    if (tl_in_dlsym) return rd(handle, name);
+    struct DlsymGuard {
+        DlsymGuard() { tl_in_dlsym = true; }
+        ~DlsymGuard() { tl_in_dlsym = false; }
+    } guard;
     void* r = rd(handle, name);
     if (handle == RTLD_NEXT || handle == RTLD_DEFAULT) return r;
     return intercept(name, r);
